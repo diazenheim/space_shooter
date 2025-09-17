@@ -3,7 +3,7 @@
 # Imports
 import arcade
 import random 
-import time
+
 
 # Constants 
 SCREEN_WIDTH = 800
@@ -11,7 +11,7 @@ SCREEN_HEIGHT = 600
 SCREEN_TITLE = "Arcade Space Shooter"
 SCALING = 0.5
 
-class SpaceShooter(arcade.Window):
+class SpaceShooter(arcade.View):
     """Space Shooter side scroller game.
     Player starts on the left, enemies appear on the right.
     Player can move anywhere, but not off screen.
@@ -20,24 +20,28 @@ class SpaceShooter(arcade.Window):
     You are gay.
     """
 
-    def __init__(self, width, height, title):
+    def __init__(self):
         """Initialize the game
         """
 
-        super().__init__(width, height, title)
+        super().__init__()
 
         #Set up the empty sprite lists
         self.enemies_list = arcade.SpriteList()
         self.clouds_list = arcade.SpriteList()
+        self.coin_list = arcade.SpriteList()
         self.all_sprites = arcade.SpriteList()
 
 
     def setup(self):
         """Get the game ready to play
         """
-
+        #set the font
+        arcade.load_font("fonts/retro.ttf")
+        
         # Set the background color
         arcade.set_background_color(arcade.color.SKY_BLUE)
+
 
         # Set up the player
         self.player = arcade.Sprite("images/fighter.png", SCALING / 1.7)
@@ -45,6 +49,7 @@ class SpaceShooter(arcade.Window):
         self.player.left = 10
         self.all_sprites.append(self.player)
         self.paused = False
+        self.score = 0
 
         #set the game over flag
         self.game_over = False
@@ -54,6 +59,8 @@ class SpaceShooter(arcade.Window):
         arcade.schedule(self.add_enemy, 0.5)
         # Spawn a new cloud every second 
         arcade.schedule(self.add_cloud, 1.5)
+        # Spawn a new coin every second
+        arcade.schedule(self.add_coin, 5)
 
 
 
@@ -105,6 +112,33 @@ class SpaceShooter(arcade.Window):
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
+    def add_coin(self, delta_time: float):
+        """Adds a new cloud to the screen 
+
+        Arguments:
+            delta_time {float} -- How much time has passed since the last call
+        """
+        if self.paused:
+            return
+        else:
+            # First, create the new cloud sprite
+            coin = FlyingSprite("images/coin.png", SCALING/6)
+            
+
+            # Set its position to a random height and off screen right, more centered vertically
+            coin.left = random.randint(self.width, self.width + 80)
+            coin.top = random.randint(50, self.height)
+
+            # Set its speed to a random speed heading left
+            coin.velocity = (random.randint(-5, -2), 0)
+
+            # Add it to the enemies list
+            self.coin_list.append(coin)
+            self.all_sprites.append(coin)
+
+            #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
+
+
 
 
     def on_draw(self):
@@ -112,16 +146,26 @@ class SpaceShooter(arcade.Window):
         """
         self.clear()
         self.all_sprites.draw()
+        arcade.draw_text(
+            f"{self.score}",
+            self.width / 2,           # centro orizzontale
+            self.height - 60,         # poco sotto il bordo superiore
+            arcade.color.WHITE,
+            50,                       # grandezza carattere
+            anchor_x="center",  
+            font_name="retro"  # deve essere il nome del font, non per forza il file
+        )
         #descrive lo stato di sconfitta
-        if self.game_over:
-            arcade.draw_text(
-                "GAME OVER",
-                self.width / 2,
-                self.height / 2,
-                arcade.color.RED,
-                font_size=40,
-                anchor_x="center"
-            )
+        #if self.game_over:
+            #arcade.draw_text(
+            #    "GAME OVER",
+             #   self.width / 2,
+              #  self.height / 2,
+               # arcade.color.RED,
+                #font_size=60,
+                #anchor_x="center",
+                #font_name="retro"
+            #)
 
 
     def on_key_press(self, symbol, modifiers):
@@ -191,10 +235,20 @@ class SpaceShooter(arcade.Window):
         if self.paused:
             return
 
-        # Did you hit anything? If so, end the game
+        # Did you hit enemies? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
-            self.game_over = True
+            game_over_view = GameOverView(self.score)
+            self.window.show_view(game_over_view)
+            # self.game_over = True
             #arcade.close_window()
+
+        if self.player.collides_with_list(self.coin_list):
+            if not self.game_over:
+                self.score+=1
+            for coin in self.player.collides_with_list(self.coin_list):
+                coin.remove_from_sprite_lists()
+            
+               
 
         # Update everything
         self.all_sprites.update()
@@ -231,10 +285,51 @@ class FlyingSprite(arcade.Sprite):
         if self.right < 0:
             self.remove_from_sprite_lists()
 
+class GameOverView(arcade.View):
+    def __init__(self, score):
+        super().__init__()
+        self.score = score
+
+    def on_draw(self):
+        self.clear()
+        arcade.draw_text("GAME OVER",
+                         self.window.width / 2,
+                         self.window.height / 2 + 40,
+                         arcade.color.RED,
+                         50,
+                         anchor_x="center",
+                         font_name="retro")
+
+        arcade.draw_text(f"Score: {self.score}",
+                         self.window.width / 2,
+                         self.window.height / 2,
+                         arcade.color.WHITE,
+                         30,
+                         anchor_x="center",
+                         font_name="retro")
+
+        arcade.draw_text("Premi R per ricominciare",
+                         self.window.width / 2,
+                         self.window.height / 2 - 60,
+                         arcade.color.YELLOW,
+                         20,
+                         anchor_x="center",
+                         font_name="retro")
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == arcade.key.R:
+            game = SpaceShooter()
+            game.setup()
+            self.window.show_view(game)
+
+
+
 
 # Main code entry point
 if __name__ == "__main__":
-    app = SpaceShooter(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-    app.setup()
+    window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
+    game = SpaceShooter()
+    game.setup()
+    window.show_view(game)
     arcade.run()
 

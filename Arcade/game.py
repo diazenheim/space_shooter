@@ -3,6 +3,7 @@
 # Imports
 import arcade
 import random 
+import time
 
 # Constants 
 SCREEN_WIDTH = 800
@@ -45,9 +46,12 @@ class SpaceShooter(arcade.Window):
         self.all_sprites.append(self.player)
         self.paused = False
 
+        #set the game over flag
+        self.game_over = False
+
+        
         # Spawn a new enemy every 0.5 seconds 
         arcade.schedule(self.add_enemy, 0.5)
-
         # Spawn a new cloud every second 
         arcade.schedule(self.add_cloud, 1.5)
 
@@ -59,20 +63,22 @@ class SpaceShooter(arcade.Window):
         Arguments: 
             delta_time {float} -- How much time has passed since the last call
         """
+        if self.paused:
+            return
+        else:
+            # First, create the new enemy sprite
+            enemy = FlyingSprite("images/enemy.png", SCALING / 2)
 
-        # First, create the new enemy sprite
-        enemy = FlyingSprite("images/enemy.png", SCALING / 2)
+            # Set its position to a random height and off screen right
+            enemy.left = random.randint(self.width, self.width + 80)
+            enemy.top = random.randint(10, self.height - 10)
 
-        # Set its position to a random height and off screen right
-        enemy.left = random.randint(self.width, self.width + 80)
-        enemy.top = random.randint(10, self.height - 10)
+            # Set its speed to a random speed heading left
+            enemy.velocity = (random.randint(-13, -5), 0)
 
-        # Set its speed to a random speed heading left
-        enemy.velocity = (random.randint(-13, -5), 0)
-
-        # Add it to the enemies list
-        self.enemies_list.append(enemy)
-        self.all_sprites.append(enemy)
+            # Add it to the enemies list
+            self.enemies_list.append(enemy)
+            self.all_sprites.append(enemy)
 
     def add_cloud(self, delta_time: float):
         """Adds a new cloud to the screen 
@@ -80,30 +86,42 @@ class SpaceShooter(arcade.Window):
         Arguments:
             delta_time {float} -- How much time has passed since the last call
         """
+        if self.paused:
+            return
+        else:
+            # First, create the new cloud sprite
+            cloud = FlyingSprite("images/cloud.png", SCALING/1.2)
 
-        # First, create the new cloud sprite
-        cloud = FlyingSprite("images/cloud.png", SCALING/1.2)
+            # Set its position to a random height and off screen right
+            cloud.left = random.randint(self.width, self.width + 80)
+            cloud.top = random.randint(10, self.height - 10)
 
-        # Set its position to a random height and off screen right
-        cloud.left = random.randint(self.width, self.width + 80)
-        cloud.top = random.randint(10, self.height - 10)
+            # Set its speed to a random speed heading left
+            cloud.velocity = (random.randint(-5, -2), 0)
 
-        # Set its speed to a random speed heading left
-        cloud.velocity = (random.randint(-5, -2), 0)
+            # Add it to the enemies list
+            self.clouds_list.append(cloud)
+            self.all_sprites.append(cloud)
 
-        # Add it to the enemies list
-        self.clouds_list.append(cloud)
-        self.all_sprites.append(cloud)
-
-        #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
+            #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
 
 
     def on_draw(self):
         """Draw all game objects
         """
-        arcade.start_render()
+        self.clear()
         self.all_sprites.draw()
+        #descrive lo stato di sconfitta
+        if self.game_over:
+            arcade.draw_text(
+                "GAME OVER",
+                self.width / 2,
+                self.height / 2,
+                arcade.color.RED,
+                font_size=40,
+                anchor_x="center"
+            )
 
 
     def on_key_press(self, symbol, modifiers):
@@ -175,7 +193,8 @@ class SpaceShooter(arcade.Window):
 
         # Did you hit anything? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
-            arcade.close_window()
+            self.game_over = True
+            #arcade.close_window()
 
         # Update everything
         self.all_sprites.update()
@@ -198,7 +217,7 @@ class FlyingSprite(arcade.Sprite):
     Flying sprites include enemies and clouds.
     """
 
-    def update(self):
+    def update(self,  delta_time: float = 1/60):
         """Update the position of the sprite. 
         When it moves off screen to the left, remove it.
         """

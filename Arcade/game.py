@@ -3,7 +3,7 @@
 # Imports
 import arcade
 import random 
-
+import pathlib
 
 # Constants 
 SCREEN_WIDTH = 800
@@ -30,6 +30,9 @@ class SpaceShooter(arcade.View):
         self.enemies_list = arcade.SpriteList()
         self.clouds_list = arcade.SpriteList()
         self.coin_list = arcade.SpriteList()
+        self.shoot_list = arcade.SpriteList()
+        self.explosion_list = arcade.SpriteList()
+        self.explosion_textures = []
         self.all_sprites = arcade.SpriteList()
 
 
@@ -66,6 +69,11 @@ class SpaceShooter(arcade.View):
         #set the game over flag
         self.game_over = False
 
+        #set explosion textures
+        frames_dir = pathlib.Path("images/explosion")
+        frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
+        self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
+
         
         # Spawn a new enemy every 0.5 seconds 
         arcade.schedule(self.add_enemy, 0.5)
@@ -98,6 +106,8 @@ class SpaceShooter(arcade.View):
             # Add it to the enemies list
             self.enemies_list.append(enemy)
             self.all_sprites.append(enemy)
+
+    
 
     def add_cloud(self, delta_time: float):
         """Adds a new cloud to the screen 
@@ -151,7 +161,25 @@ class SpaceShooter(arcade.View):
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
 
+    def add_shoot(self):
+        if self.paused:
+            return
+        else:
+            # First, create the new cloud sprite
+            shoot = FlyingSprite("images/shoot_1.png", SCALING/3)
 
+            # Set its position to a random height and off screen right
+            shoot.left = self.player.right
+            shoot.top = self.player.center_y
+
+            # Set its speed to a random speed heading left
+            shoot.velocity = (5, 0)
+
+            # Add it to the enemies list
+            self.shoot_list.append(shoot)
+            self.all_sprites.append(shoot)
+
+            #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
     def on_draw(self):
         """Draw all game objects
@@ -201,6 +229,9 @@ class SpaceShooter(arcade.View):
 
         if symbol == arcade.key.P:
             self.paused = not self.paused
+
+        if symbol == arcade.key.SPACE or symbol == arcade.key.S:
+            self.add_shoot()
 
         if symbol == arcade.key.I or symbol == arcade.key.UP:
             self.player.change_y = 5
@@ -256,7 +287,25 @@ class SpaceShooter(arcade.View):
             self.window.show_view(game_over_view)
             # self.game_over = True
             #arcade.close_window()
+            # Bullets vs enemies
+        for bullet in list(self.shoot_list):
+            hit_list = arcade.check_for_collision_with_list(bullet, self.enemies_list)
+            if hit_list:
+                bullet.remove_from_sprite_lists()
+                for enemy in hit_list:
+                    explosion = Explosion(
+                        textures=self.explosion_textures,
+                        frame_time=0.04,               # regola la velocità (più basso = più veloce)
+                        scale=SCALING * 1.6            # regola la dimensione
+                    )
+                    explosion.center_x = enemy.center_x
+                    explosion.center_y = enemy.center_y
+                    self.explosion_list.append(explosion)
+                    self.all_sprites.append(explosion)
 
+
+                    enemy.remove_from_sprite_lists()
+            
         if self.player.collides_with_list(self.coin_list):
             if not self.game_over:
                 self.score+=1
@@ -267,6 +316,8 @@ class SpaceShooter(arcade.View):
 
         # Update everything
         self.all_sprites.update()
+
+        self.all_sprites.update_animation(delta_time)
 
         # Keep the player on screen
         if self.player.top > self.height: 
@@ -297,13 +348,16 @@ class FlyingSprite(arcade.Sprite):
         #print(f"FlyingSprite position: {self.left}, {self.top}")  # Debug statement
 
         # Remove it off the screen
-        if self.right < 0:
+        if self.right < 0 or self.left > SCREEN_WIDTH+100:
             self.remove_from_sprite_lists()
 
 class GameOverView(arcade.View):
     def __init__(self, score):
         super().__init__()
         self.score = score
+        self.game_over = None
+        self.finalscore = None
+        self.restart = None
 
     #set gameover text
         self.game_over=arcade.Text("GAME OVER",
@@ -345,6 +399,33 @@ class GameOverView(arcade.View):
         if symbol == arcade.key.Q:
             # Quit immediately
             arcade.close_window()
+
+
+
+class Explosion(arcade.Sprite):
+    def __init__(self, textures, frame_time=0.04, scale=1.0):
+        # textures: lista di arcade.Texture
+        super().__init__(scale=scale)
+        self.textures = textures
+        if not self.textures:
+            # fallback: rimuovi subito se mancano i frame
+            self.remove_from_sprite_lists()
+            return
+        self.texture = self.textures[0]
+        self._frame_time = frame_time   # secondi per frame (0.04 ≈ 25 fps)
+        self._timer = 0.0
+        self._index = 0
+
+    def update_animation(self, delta_time: float = 1/60):
+        # Avanza i frame in base al tempo
+        self._timer += delta_time
+        while self._timer >= self._frame_time:
+            self._timer -= self._frame_time
+            self._index += 1
+            if self._index >= len(self.textures):
+                self.remove_from_sprite_lists()
+                return
+            self.texture = self.textures[self._index]
 
 
 

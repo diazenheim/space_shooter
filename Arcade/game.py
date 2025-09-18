@@ -49,7 +49,19 @@ class SpaceShooter(arcade.View):
         self.player.left = 10
         self.all_sprites.append(self.player)
         self.paused = False
+        #set up the score
+        self.score_text = arcade.Text(
+            "0",        # stringa iniziale
+            self.width / 2,           # centro orizzontale
+            self.height - 60,         # poco sotto il bordo superiore
+            arcade.color.WHITE,
+            50,                       # grandezza carattere
+            anchor_x="center",
+            font_name="retro"
+        )
         self.score = 0
+
+        
 
         #set the game over flag
         self.game_over = False
@@ -146,15 +158,18 @@ class SpaceShooter(arcade.View):
         """
         self.clear()
         self.all_sprites.draw()
-        arcade.draw_text(
-            f"{self.score}",
-            self.width / 2,           # centro orizzontale
-            self.height - 60,         # poco sotto il bordo superiore
-            arcade.color.WHITE,
-            50,                       # grandezza carattere
-            anchor_x="center",  
-            font_name="retro"  # deve essere il nome del font, non per forza il file
-        )
+        self.score_text.text = f"{self.score}"  #update the score text 
+        self.score_text.draw()      #draw the score
+    #    arcade.draw_text(
+    #        f"{self.score}",
+    #        self.width / 2,           # centro orizzontale
+    #        self.height - 60,         # poco sotto il bordo superiore
+    #        arcade.color.WHITE,
+    #        50,                       # grandezza carattere
+    #        anchor_x="center",  
+    #        font_name="retro"  # deve essere il nome del font, non per forza il file
+    #    )
+    #    self.score_text.draw()
         #descrive lo stato di sconfitta
         #if self.game_over:
             #arcade.draw_text(
@@ -290,9 +305,8 @@ class GameOverView(arcade.View):
         super().__init__()
         self.score = score
 
-    def on_draw(self):
-        self.clear()
-        arcade.draw_text("GAME OVER",
+    #set gameover text
+        self.game_over=arcade.Text("GAME OVER",
                          self.window.width / 2,
                          self.window.height / 2 + 40,
                          arcade.color.RED,
@@ -300,7 +314,7 @@ class GameOverView(arcade.View):
                          anchor_x="center",
                          font_name="retro")
 
-        arcade.draw_text(f"Score: {self.score}",
+        self.finalscore=arcade.Text(f"Score: {self.score}",
                          self.window.width / 2,
                          self.window.height / 2,
                          arcade.color.WHITE,
@@ -308,7 +322,7 @@ class GameOverView(arcade.View):
                          anchor_x="center",
                          font_name="retro")
 
-        arcade.draw_text("Premi R per ricominciare",
+        self.restart= arcade.Text("Premi R per ricominciare",
                          self.window.width / 2,
                          self.window.height / 2 - 60,
                          arcade.color.YELLOW,
@@ -316,11 +330,21 @@ class GameOverView(arcade.View):
                          anchor_x="center",
                          font_name="retro")
 
+    def on_draw(self):
+        self.clear()
+        self.game_over.draw()
+        self.finalscore.text = f"Score: {self.score}"
+        self.finalscore.draw()
+        self.restart.draw()
+
     def on_key_press(self, symbol, modifiers):
         if symbol == arcade.key.R:
             game = SpaceShooter()
             game.setup()
             self.window.show_view(game)
+        if symbol == arcade.key.Q:
+            # Quit immediately
+            arcade.close_window()
 
 
 

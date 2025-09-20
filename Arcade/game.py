@@ -37,6 +37,7 @@ class SpaceShooter(arcade.View):
         self.shoot_list = arcade.SpriteList()
         self.explosion_list = arcade.SpriteList()
         self.explosion_textures = []
+        self.heart_list = arcade.SpriteList()
         self.all_sprites = arcade.SpriteList()
 
 
@@ -44,29 +45,40 @@ class SpaceShooter(arcade.View):
         """Get the game ready to play
         """
         #set the font
-        arcade.load_font("fonts/retro.ttf")
+        arcade.load_font(str(FONTS_DIR/"retro.ttf"))
         
         # Set the background color
         arcade.set_background_color(arcade.color.SKY_BLUE)
 
 
         # Set up the player
-        self.player = arcade.Sprite("images/fighter.png", SCALING / 1.7)
-        self.player.center_y = self.height / 2
+        self.player = arcade.Sprite(str(IMAGES_DIR/"fighter.png"), SCALING / 1.7)        
+        self.player.center_y = SCREEN_HEIGHT / 2
         self.player.left = 10
         self.all_sprites.append(self.player)
         self.paused = False
+        #set up the hearts
+        self.heart = 0
+        self.heart_text = arcade.Text(
+            "0",        # stringa iniziale
+            SCREEN_WIDTH -70,           # centro orizzontale
+            SCREEN_HEIGHT - 60,         # poco sotto il bordo superiore
+            arcade.color.RED,
+            50,                       # grandezza carattere
+            font_name="retro"
+        )
         #set up the score
         self.score_text = arcade.Text(
             "0",        # stringa iniziale
-            self.width / 2,           # centro orizzontale
-            self.height - 60,         # poco sotto il bordo superiore
+            SCREEN_WIDTH / 2,           # centro orizzontale
+            SCREEN_HEIGHT - 60,         # poco sotto il bordo superiore
             arcade.color.WHITE,
             50,                       # grandezza carattere
             anchor_x="center",
             font_name="retro"
         )
         self.score = 0
+        self.killcounter = 0
 
         
 
@@ -74,7 +86,7 @@ class SpaceShooter(arcade.View):
         self.game_over = False
 
         #set explosion textures
-        frames_dir = pathlib.Path("images/explosion")
+        frames_dir = IMAGES_DIR/("explosion")
         frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
         self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
 
@@ -85,6 +97,7 @@ class SpaceShooter(arcade.View):
         arcade.schedule(self.add_cloud, 1.5)
         # Spawn a new coin every second
         arcade.schedule(self.add_coin, 5)
+       
 
 
 
@@ -98,11 +111,11 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new enemy sprite
-            enemy = FlyingSprite("images/enemy.png", SCALING / 2)
+            enemy = FlyingSprite(str(IMAGES_DIR/"enemy.png"), SCALING / 2)
 
             # Set its position to a random height and off screen right
-            enemy.left = random.randint(self.width, self.width + 80)
-            enemy.top = random.randint(10, self.height - 10)
+            enemy.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
+            enemy.top = random.randint(10, SCREEN_HEIGHT - 10)
 
             # Set its speed to a random speed heading left
             enemy.velocity = (random.randint(-13, -5), 0)
@@ -123,11 +136,11 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            cloud = FlyingSprite("images/cloud.png", SCALING/1.2)
+            cloud = FlyingSprite(str(IMAGES_DIR/"cloud.png"), SCALING/1.2)
 
             # Set its position to a random height and off screen right
-            cloud.left = random.randint(self.width, self.width + 80)
-            cloud.top = random.randint(10, self.height - 10)
+            cloud.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
+            cloud.top = random.randint(10, SCREEN_HEIGHT - 10)
 
             # Set its speed to a random speed heading left
             cloud.velocity = (random.randint(-5, -2), 0)
@@ -148,12 +161,12 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            coin = FlyingSprite("images/coin.png", SCALING/6)
+            coin = FlyingSprite(str(IMAGES_DIR/"coin.png"), SCALING/6)
             
 
             # Set its position to a random height and off screen right, more centered vertically
-            coin.left = random.randint(self.width, self.width + 80)
-            coin.top = random.randint(50, self.height)
+            coin.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
+            coin.top = random.randint(50, SCREEN_HEIGHT)
 
             # Set its speed to a random speed heading left
             coin.velocity = (random.randint(-5, -2), 0)
@@ -170,7 +183,7 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            shoot = FlyingSprite("images/shoot_1.png", SCALING/3)
+            shoot = FlyingSprite(str(IMAGES_DIR/"shoot_1.png"), SCALING/3)
 
             # Set its position to a random height and off screen right
             shoot.left = self.player.right
@@ -185,17 +198,41 @@ class SpaceShooter(arcade.View):
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
+    def add_heart(self):
+            if self.paused:
+                return
+            else:
+                # First, create the new heart sprite
+                heart = FlyingSprite(str(IMAGES_DIR/"heart.png"), SCALING/6)
+                
+
+                # Set its position to a random height and off screen right, more centered vertically
+                heart.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
+                heart.top = random.randint(50, SCREEN_HEIGHT)
+
+                # Set its speed to a random speed heading left
+                heart.velocity = (random.randint(-5, -2), 0)
+
+                # Add it to the heart list
+                self.heart_list.append(heart)
+                self.all_sprites.append(heart)
+
+                #print(f"Heart added at position {cloud.left}, {cloud.top}")  # Debug statement
+    
+    
     def on_draw(self):
         """Draw all game objects
         """
         self.clear()
         self.all_sprites.draw()
-        self.score_text.text = f"{self.score}"  #update the score text 
+        self.score_text.text = f"{self.score}"
+        self.heart_text.text=f"{self.heart}"  #update the score text 
+        self.heart_text.draw()      #draw the score
         self.score_text.draw()      #draw the score
     #    arcade.draw_text(
     #        f"{self.score}",
-    #        self.width / 2,           # centro orizzontale
-    #        self.height - 60,         # poco sotto il bordo superiore
+    #        SCREEN_WIDTH / 2,           # centro orizzontale
+    #        SCREEN_HEIGHT - 60,         # poco sotto il bordo superiore
     #        arcade.color.WHITE,
     #        50,                       # grandezza carattere
     #        anchor_x="center",  
@@ -206,8 +243,8 @@ class SpaceShooter(arcade.View):
         #if self.game_over:
             #arcade.draw_text(
             #    "GAME OVER",
-             #   self.width / 2,
-              #  self.height / 2,
+             #   SCREEN_WIDTH / 2,
+              #  SCREEN_HEIGHT / 2,
                # arcade.color.RED,
                 #font_size=60,
                 #anchor_x="center",
@@ -287,8 +324,22 @@ class SpaceShooter(arcade.View):
 
         # Did you hit enemies? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
-            game_over_view = GameOverView(self.score)
-            self.window.show_view(game_over_view)
+            if self.heart != 0:
+                self.heart -= 1
+                for enemy in self.player.collides_with_list(self.enemies_list):
+                    explosion = Explosion(
+                        textures=self.explosion_textures,
+                        frame_time=0.04,               # regola la velocità (più basso = più veloce)
+                        scale=SCALING * 1.6            # regola la dimensione
+                    )
+                    explosion.center_x = enemy.center_x
+                    explosion.center_y = enemy.center_y
+                    self.explosion_list.append(explosion)
+                    self.all_sprites.append(explosion)
+                    enemy.remove_from_sprite_lists()
+            else:
+                game_over_view = GameOverView(self.score)
+                self.window.show_view(game_over_view)
             # self.game_over = True
             #arcade.close_window()
             # Bullets vs enemies
@@ -296,6 +347,9 @@ class SpaceShooter(arcade.View):
             hit_list = arcade.check_for_collision_with_list(bullet, self.enemies_list)
             if hit_list:
                 bullet.remove_from_sprite_lists()
+                self.killcounter +=1
+                if self.killcounter % 10 == 0 and self.killcounter != 0:
+                    self.add_heart()
                 for enemy in hit_list:
                     explosion = Explosion(
                         textures=self.explosion_textures,
@@ -316,7 +370,12 @@ class SpaceShooter(arcade.View):
             for coin in self.player.collides_with_list(self.coin_list):
                 coin.remove_from_sprite_lists()
             
-               
+        
+        if self.player.collides_with_list(self.heart_list):
+            if not self.game_over:
+                self.heart+=1
+            for heart in self.player.collides_with_list(self.heart_list):
+                heart.remove_from_sprite_lists()
 
         # Update everything
         self.all_sprites.update()
@@ -324,10 +383,10 @@ class SpaceShooter(arcade.View):
         self.all_sprites.update_animation(delta_time)
 
         # Keep the player on screen
-        if self.player.top > self.height: 
-            self.player.top = self.height 
-        if self.player.right > self.width:
-            self.player.right = self.width
+        if self.player.top > SCREEN_HEIGHT: 
+            self.player.top = SCREEN_HEIGHT 
+        if self.player.right > SCREEN_WIDTH:
+            self.player.right = SCREEN_WIDTH
         if self.player.bottom < 0:
             self.player.bottom = 0   
         if self.player.left < 0:
@@ -364,25 +423,27 @@ class GameOverView(arcade.View):
         self.restart = None
 
     #set gameover text
+    def on_show_view(self):
+        w, h = self.window.width, self.window.height
         self.game_over=arcade.Text("GAME OVER",
-                         self.window.width / 2,
-                         self.window.height / 2 + 40,
+                         w / 2,
+                         h / 2 + 40,
                          arcade.color.RED,
                          50,
                          anchor_x="center",
                          font_name="retro")
 
         self.finalscore=arcade.Text(f"Score: {self.score}",
-                         self.window.width / 2,
-                         self.window.height / 2,
+                         w / 2,
+                         h / 2,
                          arcade.color.WHITE,
                          30,
                          anchor_x="center",
                          font_name="retro")
 
         self.restart= arcade.Text("Premi R per ricominciare",
-                         self.window.width / 2,
-                         self.window.height / 2 - 60,
+                         w / 2,
+                         h / 2 - 60,
                          arcade.color.YELLOW,
                          20,
                          anchor_x="center",
@@ -398,8 +459,8 @@ class GameOverView(arcade.View):
     def on_key_press(self, symbol, modifiers):
         if symbol == arcade.key.R:
             game = SpaceShooter()
-            game.setup()
             self.window.show_view(game)
+            game.setup()
         if symbol == arcade.key.Q:
             # Quit immediately
             arcade.close_window()
@@ -438,7 +499,7 @@ class Explosion(arcade.Sprite):
 if __name__ == "__main__":
     window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
     game = SpaceShooter()
-    game.setup()
     window.show_view(game)
+    game.setup()
     arcade.run()
 

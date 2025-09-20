@@ -4,8 +4,12 @@
 import arcade
 import random 
 import pathlib
+from pathlib import Path
 
 # Constants 
+BASE_DIR = Path(__file__).resolve().parent
+FONTS_DIR = BASE_DIR / "fonts"
+IMAGES_DIR = BASE_DIR / "images"
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600 
 SCREEN_TITLE = "Arcade Space Shooter"
@@ -173,7 +177,7 @@ class SpaceShooter(arcade.View):
             shoot.top = self.player.center_y
 
             # Set its speed to a random speed heading left
-            shoot.velocity = (5, 0)
+            shoot.velocity = (7, 0)
 
             # Add it to the enemies list
             self.shoot_list.append(shoot)

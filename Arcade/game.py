@@ -10,10 +10,13 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 FONTS_DIR = BASE_DIR / "fonts"
 IMAGES_DIR = BASE_DIR / "images"
+MUSIC_DIR = BASE_DIR / "music"
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600 
 SCREEN_TITLE = "Arcade Space Shooter"
 SCALING = 0.5
+#preload setup
+TEXTURES = {}
 
 class SpaceShooter(arcade.View):
     """Space Shooter side scroller game.
@@ -40,19 +43,55 @@ class SpaceShooter(arcade.View):
         self.heart_list = arcade.SpriteList()
         self.all_sprites = arcade.SpriteList()
 
+        #Music
+        self.bgm=None
+        self.bgm_player=None
+        self.music_volume=0.2
+        #Sound effects
+        self.sfx_1=arcade.load_sound(str(MUSIC_DIR/"explosion_3.ogg"))
+        self.sfx_2=arcade.load_sound(str(MUSIC_DIR/"explosion_2.ogg"))
+        self.sfx_volume=0.4
+        self.sfx_volume_2=1
+
 
     def setup(self):
         """Get the game ready to play
         """
+        #preloading
+        to_preload = [
+            "fighter.png",
+            "enemy.png",
+            "cloud.png",
+            "coin.png",
+            "shoot_1.png",
+            "heart.png",
+        ]
+        for name in to_preload:
+            TEXTURES[name] = arcade.load_texture(str(IMAGES_DIR/name))
+        
+        #set explosion textures
+        frames_dir = IMAGES_DIR/("explosion")
+        frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
+        self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
+
+
         #set the font
         arcade.load_font(str(FONTS_DIR/"retro.ttf"))
         
         # Set the background color
         arcade.set_background_color(arcade.color.SKY_BLUE)
 
-
+        # Set the music
+        try:
+            if self.bgm:
+                self.bgm_player.pause()
+            self.bgm = arcade.Sound(str(MUSIC_DIR/"retro-music_1.ogg"), streaming=True)
+            self.bgm_player = self.bgm.play(volume=self.music_volume, loop=True)
+        except Exception as e:
+            print("Back Ground music file not found or could not be played.", e)
         # Set up the player
-        self.player = arcade.Sprite(str(IMAGES_DIR/"fighter.png"), SCALING / 1.7)        
+        self.player = arcade.Sprite(scale=SCALING / 1.7) 
+        self.player.texture = TEXTURES["fighter.png"]       
         self.player.center_y = SCREEN_HEIGHT / 2
         self.player.left = 10
         self.all_sprites.append(self.player)
@@ -84,12 +123,6 @@ class SpaceShooter(arcade.View):
 
         #set the game over flag
         self.game_over = False
-
-        #set explosion textures
-        frames_dir = IMAGES_DIR/("explosion")
-        frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
-        self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
-
         
         # Spawn a new enemy every 0.5 seconds 
         arcade.schedule(self.add_enemy, 0.5)
@@ -111,7 +144,8 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new enemy sprite
-            enemy = FlyingSprite(str(IMAGES_DIR/"enemy.png"), SCALING / 2)
+            enemy = FlyingSprite(scale= SCALING / 2)
+            enemy.texture = TEXTURES["enemy.png"]
 
             # Set its position to a random height and off screen right
             enemy.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
@@ -136,7 +170,8 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            cloud = FlyingSprite(str(IMAGES_DIR/"cloud.png"), SCALING/1.2)
+            cloud = FlyingSprite(scale= SCALING/1.2)
+            cloud.texture = TEXTURES["cloud.png"]
 
             # Set its position to a random height and off screen right
             cloud.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
@@ -161,7 +196,8 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            coin = FlyingSprite(str(IMAGES_DIR/"coin.png"), SCALING/6)
+            coin = FlyingSprite(scale= SCALING/6)
+            coin.texture = TEXTURES["coin.png"]
             
 
             # Set its position to a random height and off screen right, more centered vertically
@@ -183,7 +219,8 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            shoot = FlyingSprite(str(IMAGES_DIR/"shoot_1.png"), SCALING/3)
+            shoot = FlyingSprite(scale= SCALING/3)
+            shoot.texture = TEXTURES["shoot_1.png"]
 
             # Set its position to a random height and off screen right
             shoot.left = self.player.right
@@ -203,7 +240,8 @@ class SpaceShooter(arcade.View):
                 return
             else:
                 # First, create the new heart sprite
-                heart = FlyingSprite(str(IMAGES_DIR/"heart.png"), SCALING/6)
+                heart = FlyingSprite(scale= SCALING/6)
+                heart.texture = TEXTURES["heart.png"]
                 
 
                 # Set its position to a random height and off screen right, more centered vertically
@@ -253,6 +291,7 @@ class SpaceShooter(arcade.View):
 
 
     def on_key_press(self, symbol, modifiers):
+        
         """Handle user keyboard input 
         Q: Quit the game
         P: Pause/Unpause the game
@@ -270,6 +309,12 @@ class SpaceShooter(arcade.View):
 
         if symbol == arcade.key.P:
             self.paused = not self.paused
+            if self.paused:
+                if self.bgm_player:
+                    self.bgm_player.pause()
+            else:
+                if self.bgm_player:
+                    self.bgm_player.play()
 
         if symbol == arcade.key.SPACE or symbol == arcade.key.S:
             self.add_shoot()
@@ -324,6 +369,8 @@ class SpaceShooter(arcade.View):
 
         # Did you hit enemies? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
+             #explosion sound
+            self.sfx_1.play(volume=self.sfx_volume_2)
             if self.heart != 0:
                 self.heart -= 1
                 for enemy in self.player.collides_with_list(self.enemies_list):
@@ -358,6 +405,9 @@ class SpaceShooter(arcade.View):
                     )
                     explosion.center_x = enemy.center_x
                     explosion.center_y = enemy.center_y
+                    #explosion sound
+                    self.sfx_2.play(volume=self.sfx_volume)
+
                     self.explosion_list.append(explosion)
                     self.all_sprites.append(explosion)
 

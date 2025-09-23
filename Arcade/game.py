@@ -48,10 +48,12 @@ class SpaceShooter(arcade.View):
         self.bgm_player=None
         self.music_volume=0.2
         #Sound effects
-        self.sfx_1=arcade.load_sound(str(MUSIC_DIR/"explosion_3.ogg"))
-        self.sfx_2=arcade.load_sound(str(MUSIC_DIR/"explosion_2.ogg"))
-        self.sfx_volume=0.4
-        self.sfx_volume_2=1
+        self.sfx_exp_1=arcade.load_sound(str(MUSIC_DIR/"explosion_sound_best_1.wav"))
+        self.sfx_exp_2=arcade.load_sound(str(MUSIC_DIR/"explosion_sound_best_2.wav"))
+        self.sfx_exp_vol=0.4
+        self.sfx_exp_vol_2=0.6
+        self.sfx_heart=arcade.load_sound(str(MUSIC_DIR/"heart_sound.wav"))
+        self.sfx_coin=arcade.load_sound(str(MUSIC_DIR/"coin_sound.wav"))
 
 
     def setup(self):
@@ -309,12 +311,10 @@ class SpaceShooter(arcade.View):
 
         if symbol == arcade.key.P:
             self.paused = not self.paused
-            if self.paused:
-                if self.bgm_player:
-                    self.bgm_player.pause()
-            else:
-                if self.bgm_player:
-                    self.bgm_player.play()
+            
+            pauseview=PauseMenuView(self)
+            self.window.show_view(pauseview)
+            return
 
         if symbol == arcade.key.SPACE or symbol == arcade.key.S:
             self.add_shoot()
@@ -370,7 +370,7 @@ class SpaceShooter(arcade.View):
         # Did you hit enemies? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
              #explosion sound
-            self.sfx_1.play(volume=self.sfx_volume_2)
+            self.sfx_exp_1.play(volume=self.sfx_exp_vol_2)
             if self.heart != 0:
                 self.heart -= 1
                 for enemy in self.player.collides_with_list(self.enemies_list):
@@ -406,7 +406,7 @@ class SpaceShooter(arcade.View):
                     explosion.center_x = enemy.center_x
                     explosion.center_y = enemy.center_y
                     #explosion sound
-                    self.sfx_2.play(volume=self.sfx_volume)
+                    self.sfx_exp_2.play(volume=self.sfx_exp_vol)
 
                     self.explosion_list.append(explosion)
                     self.all_sprites.append(explosion)
@@ -416,6 +416,7 @@ class SpaceShooter(arcade.View):
             
         if self.player.collides_with_list(self.coin_list):
             if not self.game_over:
+                self.sfx_coin.play(volume=self.sfx_exp_vol)
                 self.score+=1
             for coin in self.player.collides_with_list(self.coin_list):
                 coin.remove_from_sprite_lists()
@@ -423,6 +424,7 @@ class SpaceShooter(arcade.View):
         
         if self.player.collides_with_list(self.heart_list):
             if not self.game_over:
+                self.sfx_heart.play(volume=self.sfx_exp_vol)
                 self.heart+=1
             for heart in self.player.collides_with_list(self.heart_list):
                 heart.remove_from_sprite_lists()
@@ -542,6 +544,35 @@ class Explosion(arcade.Sprite):
                 return
             self.texture = self.textures[self._index]
 
+
+# --- Aggiungi questa classe ---
+class PauseMenuView(arcade.View):
+    def __init__(self, game_view: "SpaceShooter"):
+        super().__init__()
+        self.game_view = game_view
+        self.game_view.paused = True
+        
+
+        w, h = self.window.width, self.window.height
+        self.title = arcade.Text("PAUSA", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
+        self.msg1  = arcade.Text("R or P - Restart", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg2  = arcade.Text("M - Menu", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+
+    def on_draw(self):
+        # Disegna il gioco “congelato” sotto
+        self.game_view.on_draw()
+        arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 180))
+        self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw()
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol in (arcade.key.R, arcade.key.P):
+            self.game_view.paused = False
+            self.window.show_view(self.game_view)
+        elif symbol == arcade.key.M:
+            pass    #to add main menu later
+        elif symbol == arcade.key.Q:
+            arcade.close_window()
 
 
 

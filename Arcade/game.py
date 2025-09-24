@@ -16,10 +16,26 @@ SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600 
 SCREEN_TITLE = "Arcade Space Shooter"
 SCALING = 0.5
+BGM_STARTED= False
+BGM_PLAYER=None
 #preload setup
 TEXTURES = {}
 # subito dopo le costanti
 arcade.load_font(str(FONTS_DIR / "retro.ttf"))
+
+def _stop_bgm():
+    """Ferma e rilascia il background music player globale."""
+    global BGM_STARTED, BGM_PLAYER
+    if BGM_PLAYER:
+        try:
+            BGM_PLAYER.pause()
+            BGM_PLAYER.delete()
+        except Exception:
+            pass
+    BGM_PLAYER = None
+    BGM_STARTED = False
+
+
 
 
 class SpaceShooter(arcade.View):
@@ -92,7 +108,30 @@ class SpaceShooter(arcade.View):
         except Exception as e:
             print("Back Ground music file not found or could not be played.", e)'''
         # --- BGM: prefer WAV streaming on macOS, fall back to OGG, then non-streaming ---
-        try:
+        # --- BGM: avvia una sola volta ---
+        global BGM_STARTED, BGM_PLAYER
+        if not BGM_STARTED:
+            try:
+                # scegli il formato che sai funzionare su macOS: OGG/Vorbis o WAV
+                music_path = MUSIC_DIR / "retro-music_1.wav"
+                self.bgm = arcade.Sound(str(music_path), streaming=True)
+                BGM_PLAYER = self.bgm.play(loop=True)
+                if BGM_PLAYER:
+                    BGM_PLAYER.volume = self.music_volume
+                BGM_STARTED = True
+                print("[BGM] avviata (prima volta)")
+            except Exception as e:
+                print("[BGM] errore avvio:", e)
+        else:
+            # già attiva → aggiorna solo il volume se vuoi
+            if BGM_PLAYER:
+                BGM_PLAYER.volume = self.music_volume
+            print("[BGM] già attiva: non riavvio")
+
+        # importa: tutte le view puntano allo stesso player
+        self.bgm_player = BGM_PLAYER
+
+        '''try:
             # stop any previous stream
             if self.bgm_player:
                 try:
@@ -130,7 +169,7 @@ class SpaceShooter(arcade.View):
                     arcade.play_sound(clip, volume=self.music_volume)
                     print("[BGM] Fallback non-streaming started")
                 except Exception as e_ns:
-                    print("[BGM] Fallback non-streaming failed:", e_ns)
+                    print("[BGM] Fallback non-streaming failed:", e_ns)'''
 
         # Set up the player
         self.player = arcade.Sprite(scale=SCALING / 1.7) 
@@ -161,6 +200,8 @@ class SpaceShooter(arcade.View):
         )
         self.score = 0
         self.killcounter = 0
+        self.elapsed_time = 0.0
+        
 
         
 
@@ -173,7 +214,15 @@ class SpaceShooter(arcade.View):
         arcade.schedule(self.add_cloud, 1.5)
         # Spawn a new coin every second
         arcade.schedule(self.add_coin, 5)
-       
+    
+    #deallocation
+    def on_show_view(self):
+    # riallinea il riferimento al player globale (se servisse)
+        global BGM_PLAYER
+        self.bgm_player = BGM_PLAYER
+
+    def on_hide_view(self):
+        self.paused = True
 
 
 
@@ -189,6 +238,7 @@ class SpaceShooter(arcade.View):
             # First, create the new enemy sprite
             enemy = FlyingSprite(scale= SCALING / 2)
             enemy.texture = TEXTURES["enemy.png"]
+
 
             # Set its position to a random height and off screen right
             enemy.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
@@ -226,6 +276,13 @@ class SpaceShooter(arcade.View):
             # Add it to the enemies list
             self.clouds_list.append(cloud)
             self.all_sprites.append(cloud)
+
+            #spawn more frequently
+            spawn= (self.score+self.elapsed_time**0.7)/10
+            i=spawn
+            while i >0.5:
+                i-=0.5
+                self.add_enemy(delta_time) 
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
@@ -348,7 +405,9 @@ class SpaceShooter(arcade.View):
         """
         if symbol == arcade.key.Q:
             # Quit immediately
+            _stop_bgm()
             arcade.close_window()
+
 
         if symbol == arcade.key.P:
             # Pause/unpause the game
@@ -407,6 +466,7 @@ class SpaceShooter(arcade.View):
         # If paused, don't update anything
         if self.paused:
             return
+        self.elapsed_time += delta_time
 
         # Did you hit enemies? If so, end the game
         if self.player.collides_with_list(self.enemies_list):
@@ -556,6 +616,7 @@ class GameOverView(arcade.View):
             game.setup()
         if symbol == arcade.key.Q:
             # Quit immediately
+            _stop_bgm()
             arcade.close_window()
 
 
@@ -610,10 +671,49 @@ class PauseMenuView(arcade.View):
             self.game_view.paused = False
             self.window.show_view(self.game_view)
         elif symbol == arcade.key.M:
-            pass    #to add main menu later
+            self.game_view.paused = True
+            main_menu=MainMenuView()
+            self.window.show_view(main_menu)
+            
+            
         elif symbol == arcade.key.Q:
+            _stop_bgm()
             arcade.close_window()
 
+class InstructionView(arcade.View):
+    def __init__(self, game_view: "SpaceShooter" = None):
+        super().__init__()
+        self.game_view = game_view
+        self.title = self.msg1 = self.msg2 = self.msg3 = self.msg4 = self.msg5 = None
+        
+    def on_show_view(self):
+        w, h = self.window.width, self.window.height
+        arcade.set_background_color(arcade.color.SKY_BLUE)
+        self.title = arcade.Text("INSTRUCTIONS", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
+        self.msg1  = arcade.Text("I/J/K/L or Arrows - Move", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg2  = arcade.Text("SPACE or S - Shoot", w/2, h/2 - 20, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 50, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg4  = arcade.Text("M - back to menu", w/2, h/2 - 80, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg5 = arcade.Text("P - Pause", w/2, h/2 - 115, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+
+    def on_draw(self):
+        
+        if self.game_view is not None:
+            self.game_view.on_draw()
+            arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
+        else:
+            self.clear()
+        self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw(); self.msg4.draw(); self.msg5.draw()
+
+    def on_key_press(self, symbol, modifiers):
+        
+        if symbol == arcade.key.M:
+            main_menu=MainMenuView(self.game_view)
+            self.window.show_view(main_menu)
+            
+        elif symbol == arcade.key.Q:
+            _stop_bgm()
+            arcade.close_window()
 
 class MainMenuView(arcade.View):
     def __init__(self, game_view: "SpaceShooter" = None):
@@ -623,6 +723,7 @@ class MainMenuView(arcade.View):
         
     def on_show_view(self):
         w, h = self.window.width, self.window.height
+        arcade.set_background_color(arcade.color.SKY_BLUE)
         self.title = arcade.Text("MENU", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
         self.msg1  = arcade.Text("N - New Game", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg2  = arcade.Text("I - Setting", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
@@ -640,12 +741,14 @@ class MainMenuView(arcade.View):
     def on_key_press(self, symbol, modifiers):
         if symbol == arcade.key.N:
             game=SpaceShooter()
-            window.show_view(game)
+            self.window.show_view(game)
             game.setup()
             
         elif symbol == arcade.key.I:
-            pass    #to add main menu later
+            instruction_view=InstructionView(self.game_view)
+            self.window.show_view(instruction_view)
         elif symbol == arcade.key.Q:
+            _stop_bgm()
             arcade.close_window()
 
 

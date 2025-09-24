@@ -9,6 +9,7 @@ from pathlib import Path
 # Constants 
 BASE_DIR = Path(__file__).resolve().parent
 FONTS_DIR = BASE_DIR / "fonts"
+
 IMAGES_DIR = BASE_DIR / "images"
 MUSIC_DIR = BASE_DIR / "music"
 SCREEN_WIDTH = 800
@@ -17,6 +18,9 @@ SCREEN_TITLE = "Arcade Space Shooter"
 SCALING = 0.5
 #preload setup
 TEXTURES = {}
+# subito dopo le costanti
+arcade.load_font(str(FONTS_DIR / "retro.ttf"))
+
 
 class SpaceShooter(arcade.View):
     """Space Shooter side scroller game.
@@ -75,22 +79,59 @@ class SpaceShooter(arcade.View):
         frames_dir = IMAGES_DIR/("explosion")
         frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
         self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
-
-
-        #set the font
-        arcade.load_font(str(FONTS_DIR/"retro.ttf"))
         
         # Set the background color
         arcade.set_background_color(arcade.color.SKY_BLUE)
 
         # Set the music
-        try:
+        '''try:
             if self.bgm:
                 self.bgm_player.pause()
             self.bgm = arcade.Sound(str(MUSIC_DIR/"retro-music_1.ogg"), streaming=True)
             self.bgm_player = self.bgm.play(volume=self.music_volume, loop=True)
         except Exception as e:
-            print("Back Ground music file not found or could not be played.", e)
+            print("Back Ground music file not found or could not be played.", e)'''
+        # --- BGM: prefer WAV streaming on macOS, fall back to OGG, then non-streaming ---
+        try:
+            # stop any previous stream
+            if self.bgm_player:
+                try:
+                    self.bgm_player.pause()
+                    self.bgm_player.delete()
+                except Exception:
+                    pass
+                self.bgm_player = None
+
+            # 1) Try WAV streaming first (works out of the box on macOS)
+            music_path = MUSIC_DIR / "retro-music_1.wav"   # <-- use the WAV you just made
+            self.bgm = arcade.Sound(str(music_path), streaming=True)
+            self.bgm_player = self.bgm.play(loop=True)  # don't pass volume here
+            if self.bgm_player is None:
+                raise RuntimeError("Sound.play() returned None")
+            self.bgm_player.volume = self.music_volume
+            print(f"[BGM] Streaming started: {music_path.name}")
+
+        except Exception as e_wav:
+            print("[BGM] WAV streaming failed:", e_wav)
+            try:
+                # 2) Fall back to OGG streaming (works only if FFmpeg decoders are available)
+                music_path = MUSIC_DIR / "retro-music_1.ogg"
+                self.bgm = arcade.Sound(str(music_path), streaming=True)
+                self.bgm_player = self.bgm.play(loop=True)
+                if self.bgm_player is None:
+                    raise RuntimeError("Sound.play() returned None")
+                self.bgm_player.volume = self.music_volume
+                print(f"[BGM] Streaming started (OGG): {music_path.name}")
+            except Exception as e_ogg:
+                print("[BGM] OGG streaming failed:", e_ogg)
+                try:
+                    # 3) Last resort: non-streaming playback
+                    clip = arcade.load_sound(str(music_path), streaming=False)
+                    arcade.play_sound(clip, volume=self.music_volume)
+                    print("[BGM] Fallback non-streaming started")
+                except Exception as e_ns:
+                    print("[BGM] Fallback non-streaming failed:", e_ns)
+
         # Set up the player
         self.player = arcade.Sprite(scale=SCALING / 1.7) 
         self.player.texture = TEXTURES["fighter.png"]       
@@ -310,7 +351,7 @@ class SpaceShooter(arcade.View):
             arcade.close_window()
 
         if symbol == arcade.key.P:
-            self.paused = not self.paused
+            # Pause/unpause the game
             
             pauseview=PauseMenuView(self)
             self.window.show_view(pauseview)
@@ -472,7 +513,7 @@ class GameOverView(arcade.View):
         self.score = score
         self.game_over = None
         self.finalscore = None
-        self.restart = None
+        self.resume = None
 
     #set gameover text
     def on_show_view(self):
@@ -493,7 +534,7 @@ class GameOverView(arcade.View):
                          anchor_x="center",
                          font_name="retro")
 
-        self.restart= arcade.Text("Premi R per ricominciare",
+        self.resume= arcade.Text("Premi R per ricominciare",
                          w / 2,
                          h / 2 - 60,
                          arcade.color.YELLOW,
@@ -506,7 +547,7 @@ class GameOverView(arcade.View):
         self.game_over.draw()
         self.finalscore.text = f"Score: {self.score}"
         self.finalscore.draw()
-        self.restart.draw()
+        self.resume.draw()
 
     def on_key_press(self, symbol, modifiers):
         if symbol == arcade.key.R:
@@ -551,11 +592,10 @@ class PauseMenuView(arcade.View):
         super().__init__()
         self.game_view = game_view
         self.game_view.paused = True
-        
 
         w, h = self.window.width, self.window.height
         self.title = arcade.Text("PAUSA", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
-        self.msg1  = arcade.Text("R or P - Restart", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg1  = arcade.Text("R or P - Resume", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg2  = arcade.Text("M - Menu", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
 
@@ -575,12 +615,45 @@ class PauseMenuView(arcade.View):
             arcade.close_window()
 
 
+class MainMenuView(arcade.View):
+    def __init__(self, game_view: "SpaceShooter" = None):
+        super().__init__()
+        self.game_view = game_view
+        self.title = self.msg1 = self.msg2 = self.msg3 = None
+        
+    def on_show_view(self):
+        w, h = self.window.width, self.window.height
+        self.title = arcade.Text("MENU", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
+        self.msg1  = arcade.Text("N - New Game", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg2  = arcade.Text("I - Setting", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+        self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+
+    def on_draw(self):
+        
+        if self.game_view is not None:
+            self.game_view.on_draw()
+            arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
+        else:
+            self.clear()
+        self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw()
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == arcade.key.N:
+            game=SpaceShooter()
+            window.show_view(game)
+            game.setup()
+            
+        elif symbol == arcade.key.I:
+            pass    #to add main menu later
+        elif symbol == arcade.key.Q:
+            arcade.close_window()
+
+
 
 # Main code entry point
 if __name__ == "__main__":
     window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-    game = SpaceShooter()
-    window.show_view(game)
-    game.setup()
+    main_menu=MainMenuView()
+    window.show_view(main_menu)
     arcade.run()
-
+    

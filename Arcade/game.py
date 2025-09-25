@@ -7,6 +7,14 @@ import pathlib
 from pathlib import Path
 
 # Constants 
+
+# --- THEME (NEW) ---
+CURRENT_THEME = "day"  # "day" | "night"
+
+STAR_TEXTURE = None
+BG_ELEMENT_TEXTURES = {}  # es. {"moon.png": <texture>}
+
+
 BASE_DIR = Path(__file__).resolve().parent
 FONTS_DIR = BASE_DIR / "fonts"
 
@@ -84,13 +92,26 @@ class SpaceShooter(arcade.View):
             "fighter.png",
             "enemy.png",
             "cloud.png",
+            "dark_cloud.png",
             "coin.png",
             "shoot_1.png",
             "heart.png",
         ]
         for name in to_preload:
             TEXTURES[name] = arcade.load_texture(str(IMAGES_DIR/name))
-        
+
+        # --- NEW: preload star + moon ---
+        try:
+            STAR_TEXTURE = arcade.load_texture(str(IMAGES_DIR / "star.png"))
+        except Exception:
+            STAR_TEXTURE = None
+
+        for name in ("moon.png",):
+            try:
+                BG_ELEMENT_TEXTURES[name] = arcade.load_texture(str(IMAGES_DIR / name))
+            except Exception:
+                pass
+
         #set explosion textures
         frames_dir = IMAGES_DIR/("explosion")
         frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
@@ -98,6 +119,16 @@ class SpaceShooter(arcade.View):
         
         # Set the background color
         arcade.set_background_color(arcade.color.SKY_BLUE)
+
+        # --- NEW: sprite list per elementi di sfondo (stelle/luna) ---
+        self.bg_sprites = arcade.SpriteList()
+
+        # --- NEW: imposta il colore in base al tema ---
+        if CURRENT_THEME == "night":
+            arcade.set_background_color(arcade.color.DARK_MIDNIGHT_BLUE)
+        else:
+            arcade.set_background_color(arcade.color.SKY_BLUE)
+
 
         # Set the music
         '''try:
@@ -179,7 +210,7 @@ class SpaceShooter(arcade.View):
         self.all_sprites.append(self.player)
         self.paused = False
         #set up the hearts
-        self.heart = 0
+        self.heart = 3
         self.heart_text = arcade.Text(
             "0",        # stringa iniziale
             SCREEN_WIDTH -70,           # centro orizzontale
@@ -214,6 +245,12 @@ class SpaceShooter(arcade.View):
         arcade.schedule(self.add_cloud, 1.5)
         # Spawn a new coin every second
         arcade.schedule(self.add_coin, 5)
+
+        # --- NEW: stelle e luna solo in night ---
+        if CURRENT_THEME == "night":
+            arcade.schedule(self.add_star, 0.35)
+            arcade.schedule(self.add_moon, 20.0)
+
     
     #deallocation
     def on_show_view(self):
@@ -223,7 +260,6 @@ class SpaceShooter(arcade.View):
 
     def on_hide_view(self):
         self.paused = True
-
 
 
     def add_enemy(self, delta_time: float):
@@ -236,7 +272,7 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new enemy sprite
-            enemy = FlyingSprite(scale= SCALING / 2)
+            enemy = FlyingSprite(scale = SCALING / 2)
             enemy.texture = TEXTURES["enemy.png"]
 
 
@@ -263,8 +299,10 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            cloud = FlyingSprite(scale= SCALING/1.2)
-            cloud.texture = TEXTURES["cloud.png"]
+            cloud = FlyingSprite(scale=SCALING/1.2)
+            # usa la dark cloud se night, altrimenti quella normale
+            cloud.texture = TEXTURES["dark_cloud.png"] if CURRENT_THEME == "night" else TEXTURES["cloud.png"]
+
 
             # Set its position to a random height and off screen right
             cloud.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
@@ -278,14 +316,42 @@ class SpaceShooter(arcade.View):
             self.all_sprites.append(cloud)
 
             #spawn more frequently
-            spawn= (self.score+self.elapsed_time**0.7)/10
-            i=spawn
-            while i >0.5:
-                i-=0.5
+            spawn = (self.score+self.elapsed_time**0.7)/10
+            i = spawn
+            while i > 0.5:
+                i -= 0.5
                 self.add_enemy(delta_time) 
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
+    def add_star(self, delta_time: float):
+        if self.paused or STAR_TEXTURE is None or CURRENT_THEME != "night":
+            return
+        star = StarSprite(scale=SCALING/3)
+        star.texture = STAR_TEXTURE
+        star.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
+        star.center_y = random.randint(int(SCREEN_HEIGHT*0.55), SCREEN_HEIGHT - 10)
+        star.velocity = (random.randint(-3, -1), 0)  # molto lenta
+        star.alpha = random.randint(120, 220)        # luminosità variabile
+        self.bg_sprites.append(star)
+
+    def add_moon(self, delta_time: float):
+        if self.paused or "moon.png" not in BG_ELEMENT_TEXTURES or CURRENT_THEME != "night":
+            return
+        # evita più lune contemporaneamente
+        for s in self.bg_sprites:
+            if getattr(s, "_is_moon", False):
+                return
+        moon = FlyingSprite(scale=SCALING)
+        moon.texture = BG_ELEMENT_TEXTURES["moon.png"]
+        moon.left = SCREEN_WIDTH + 100
+        moon.center_y = int(SCREEN_HEIGHT * random.uniform(0.65, 0.85))
+        moon.velocity = (-2, 0)
+        moon.alpha = 230
+        moon._is_moon = True
+        self.bg_sprites.append(moon)
+
+    
     def add_coin(self, delta_time: float):
         """Adds a new cloud to the screen 
 
@@ -296,7 +362,7 @@ class SpaceShooter(arcade.View):
             return
         else:
             # First, create the new cloud sprite
-            coin = FlyingSprite(scale= SCALING/6)
+            coin = FlyingSprite(scale = SCALING/8)
             coin.texture = TEXTURES["coin.png"]
             
 
@@ -340,7 +406,7 @@ class SpaceShooter(arcade.View):
                 return
             else:
                 # First, create the new heart sprite
-                heart = FlyingSprite(scale= SCALING/6)
+                heart = FlyingSprite(scale = SCALING/9)
                 heart.texture = TEXTURES["heart.png"]
                 
 
@@ -362,6 +428,8 @@ class SpaceShooter(arcade.View):
         """Draw all game objects
         """
         self.clear()
+        # --- NEW ---
+        self.bg_sprites.draw()
         self.all_sprites.draw()
         self.score_text.text = f"{self.score}"
         self.heart_text.text=f"{self.heart}"  #update the score text 
@@ -620,6 +688,22 @@ class GameOverView(arcade.View):
             arcade.close_window()
 
 
+class StarSprite(arcade.Sprite):
+    """Stella con leggero 'twinkle'."""
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._twinkle_timer = 0.0
+
+    def update(self, delta_time: float = 1/60):
+        super().update()
+        if self.right < 0 or self.left > SCREEN_WIDTH + 100:
+            self.remove_from_sprite_lists()
+        self._twinkle_timer += delta_time
+        if self._twinkle_timer >= random.uniform(0.2, 0.5):
+            self._twinkle_timer = 0.0
+            self.alpha = max(100, min(255, self.alpha + random.randint(-40, 40)))
+
+
 
 class Explosion(arcade.Sprite):
     def __init__(self, textures, frame_time=0.04, scale=1.0):
@@ -661,9 +745,9 @@ class PauseMenuView(arcade.View):
         self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
 
     def on_draw(self):
-        # Disegna il gioco “congelato” sotto
+        # Disegna il gioco “congelato” sotto 
         self.game_view.on_draw()
-        arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 180))
+        arcade.draw_lrtb_rectangle_filled(0, self.window.width, self.window.height, 0, (0, 0, 0, 180))
         self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw()
 
     def on_key_press(self, symbol, modifiers):
@@ -721,35 +805,100 @@ class MainMenuView(arcade.View):
         self.game_view = game_view
         self.title = self.msg1 = self.msg2 = self.msg3 = None
         
+    
+
     def on_show_view(self):
         w, h = self.window.width, self.window.height
         arcade.set_background_color(arcade.color.SKY_BLUE)
-        self.title = arcade.Text("MENU", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
-        self.msg1  = arcade.Text("N - New Game", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
-        self.msg2  = arcade.Text("I - Setting", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
-        self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
+
+        # Titolo (volendo mostra anche il tema corrente)
+        self.title = arcade.Text(
+            f"MENU  ({CURRENT_THEME.upper()})",
+            w / 2, h / 2 + 60,
+            arcade.color.WHITE, 48,
+            anchor_x="center", font_name="retro"
+        )
+
+        # --- Voci aggiornate ---
+        self.msg_start = arcade.Text(
+            "SPACE - New Game",
+            w / 2, h / 2 + 10,
+            arcade.color.YELLOW, 24,
+            anchor_x="center", font_name="retro"
+        )
+
+        self.msg_theme = arcade.Text(
+            "D - Day    |    N - Night",
+            w / 2, h / 2 - 25,
+            arcade.color.YELLOW, 24,
+            anchor_x="center", font_name="retro"
+        )
+
+        self.msg_settings = arcade.Text(
+            "I - Setting",
+            w / 2, h / 2 - 60,
+            arcade.color.YELLOW, 24,
+            anchor_x="center", font_name="retro"
+        )
+
+        self.msg_quit = arcade.Text(
+            "Q - Quit",
+            w / 2, h / 2 - 95,
+            arcade.color.YELLOW, 24,
+            anchor_x="center", font_name="retro"
+        )
 
     def on_draw(self):
-        
+        # Se vuoi mantenere l’effetto “sfondo scurito” quando arrivi dal gioco:
         if self.game_view is not None:
             self.game_view.on_draw()
-            arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
+            arcade.draw_lrtb_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
         else:
             self.clear()
-        self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw()
+
+        # Disegna titolo e voci aggiornate
+        # (il titolo mostra anche il tema attuale)
+        self.title.text = f"MENU  ({CURRENT_THEME.upper()})"
+        self.title.draw()
+        self.msg_start.draw()
+        self.msg_theme.draw()
+        self.msg_settings.draw()
+        self.msg_quit.draw()
+
+
 
     def on_key_press(self, symbol, modifiers):
-        if symbol == arcade.key.N:
-            game=SpaceShooter()
+        """Gestione input nel MENU:
+        SPACE = New Game | D = Day | N = Night | I = Setting | Q = Quit
+        """
+        global CURRENT_THEME
+
+        if symbol == arcade.key.SPACE:
+            # Avvia un nuovo gioco
+            game = SpaceShooter()
             self.window.show_view(game)
             game.setup()
-            
+
+        elif symbol == arcade.key.D:
+            # Tema Giorno
+            CURRENT_THEME = "day"
+            print("[Theme] DAY")
+
+        elif symbol == arcade.key.N:
+            # Tema Notte
+            CURRENT_THEME = "night"
+            print("[Theme] NIGHT")
+
         elif symbol == arcade.key.I:
-            instruction_view=InstructionView(self.game_view)
+            # Schermata impostazioni/istruzioni
+            instruction_view = InstructionView(self.game_view)
             self.window.show_view(instruction_view)
+
         elif symbol == arcade.key.Q:
+            # Esci dal gioco
             _stop_bgm()
             arcade.close_window()
+
 
 
 

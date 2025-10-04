@@ -3,8 +3,11 @@
 # Imports
 import arcade
 import random 
-import pathlib
 from pathlib import Path
+import os
+import json
+import tempfile
+from datetime import datetime
 
 # Constants 
 
@@ -16,6 +19,7 @@ BG_ELEMENT_TEXTURES = {}  # es. {"moon.png": <texture>}
 
 
 BASE_DIR = Path(__file__).resolve().parent
+RECORDS_PATH = BASE_DIR / "records.json"
 FONTS_DIR = BASE_DIR / "fonts"
 
 IMAGES_DIR = BASE_DIR / "images"
@@ -26,6 +30,7 @@ SCREEN_TITLE = "Arcade Space Shooter"
 SCALING = 0.5
 BGM_STARTED= False
 BGM_PLAYER=None
+
 #preload setup
 TEXTURES = {}
 # subito dopo le costanti
@@ -43,8 +48,63 @@ def _stop_bgm():
     BGM_PLAYER = None
     BGM_STARTED = False
 
+def apply_theme_background():
+    arcade.set_background_color(
+        arcade.color.DARK_MIDNIGHT_BLUE if CURRENT_THEME == "night" else arcade.color.SKY_BLUE
+    )
 
 
+#Setting json file and record
+def _default_records():
+    return {"high_score": 0, "runs": []}
+
+def _load_records():
+    """Return dict. If not available use default"""
+    try:
+        if not RECORDS_PATH.exists():
+            return _default_records()
+        with open(RECORDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # normalizza chiavi mancanti
+        return data
+    except Exception:
+        
+        return _default_records()
+
+def _atomic_write_json(path: Path, data: dict):
+    """Scrittura atomica: evita file troncati in caso di crash."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="records_", suffix=".json", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)  # atomic on Win/Linux/Mac
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
+def _save_records(data: dict):
+    _atomic_write_json(RECORDS_PATH, data)
+
+def get_high_score() -> int:
+    return _load_records().get("high_score", 0)
+
+def submit_score(score: int, name: str = "Player") -> dict:
+    data = _load_records()
+    data["runs"].append({
+        "score": int(score),
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "name": name
+    })
+    is_record = False
+    if score > data.get("high_score", 0):
+        data["high_score"] = int(score)
+        is_record = True
+    _save_records(data)
+    return {"is_record": is_record, "high_score": data["high_score"]}
 
 class SpaceShooter(arcade.View):
     """Space Shooter side scroller game.
@@ -60,16 +120,22 @@ class SpaceShooter(arcade.View):
         """
 
         super().__init__()
+        #Scene with layer
+        self.scene : arcade.Scene| None=None
 
-        #Set up the empty sprite lists
-        self.enemies_list = arcade.SpriteList()
-        self.clouds_list = arcade.SpriteList()
-        self.coin_list = arcade.SpriteList()
-        self.shoot_list = arcade.SpriteList()
-        self.explosion_list = arcade.SpriteList()
+        self.player : arcade.Sprite | None=None
         self.explosion_textures = []
-        self.heart_list = arcade.SpriteList()
-        self.all_sprites = arcade.SpriteList()
+        #UI
+        self.score_text : arcade.Text | None=None
+        self.heart_text : arcade.Text | None=None
+
+        #state
+        self.paused = False
+        self.heart = 3
+        self.score = 0
+        self.killcounter = 0
+        self.elapsed_time = 0.0
+        self.game_over = False
 
         #Music
         self.bgm=None
@@ -82,6 +148,36 @@ class SpaceShooter(arcade.View):
         self.sfx_exp_vol_2=0.6
         self.sfx_heart=arcade.load_sound(str(MUSIC_DIR/"heart_sound.wav"))
         self.sfx_coin=arcade.load_sound(str(MUSIC_DIR/"coin_sound.wav"))
+        
+        #Set up the empty sprite lists
+        self.enemies_list = arcade.SpriteList()
+        self.clouds_list = arcade.SpriteList()
+        self.coin_list = arcade.SpriteList()
+        self.shoot_list = arcade.SpriteList()
+        self.explosion_list = arcade.SpriteList()
+        
+        self.heart_list = arcade.SpriteList()
+        self.star_list = arcade.SpriteList()
+        self.all_sprites = arcade.SpriteList()
+
+
+        #Controller
+        self.PAD_SPEED = 5.0    
+        self.STICK_DEADZONE = 0.15  
+        self.controller = None
+        controllers = arcade.get_controllers()
+
+        # If we have any...
+        if controllers:
+            # Grab the first one in  the list
+            self.controller = controllers[0]
+
+            # Open it for input
+            self.controller.open()
+
+            # Push this object as a handler for controller events.
+            # Required for the controller events to be called.
+            self.controller.push_handlers(self)
 
 
     def setup(self):
@@ -96,119 +192,48 @@ class SpaceShooter(arcade.View):
             "coin.png",
             "shoot_1.png",
             "heart.png",
+            "star.png",
+            "moon.png"
+
         ]
         for name in to_preload:
             TEXTURES[name] = arcade.load_texture(str(IMAGES_DIR/name))
 
-        # --- NEW: preload star + moon ---
-        try:
-            STAR_TEXTURE = arcade.load_texture(str(IMAGES_DIR / "star.png"))
-        except Exception:
-            STAR_TEXTURE = None
-
-        for name in ("moon.png",):
-            try:
-                BG_ELEMENT_TEXTURES[name] = arcade.load_texture(str(IMAGES_DIR / name))
-            except Exception:
-                pass
-
+    # --- NEW: preload star + moon ---
+        global STAR_TEXTURE 
+        STAR_TEXTURE = TEXTURES[ "star.png"]
+        BG_ELEMENT_TEXTURES["moon.png"]= TEXTURES["moon.png"]
+        
         #set explosion textures
         frames_dir = IMAGES_DIR/("explosion")
         frame_paths = sorted(frames_dir.glob("*.png"))  # Assicurati che i nomi siano ordinabili
         self.explosion_textures = [arcade.load_texture(str(p)) for p in frame_paths]    
         
         # Set the background color
-        arcade.set_background_color(arcade.color.SKY_BLUE)
+        arcade.set_background_color(
+            arcade.color.DARK_MIDNIGHT_BLUE if CURRENT_THEME == "night" else arcade.color.SKY_BLUE
+        )  
 
-        # --- NEW: sprite list per elementi di sfondo (stelle/luna) ---
-        self.bg_sprites = arcade.SpriteList()
+        # --- Scene & layers ---
+        self.scene = arcade.Scene()  # <<< CHANGED: creazione Scene
+        # Ordine: back → front
+        self.scene.add_sprite_list("Background")    # <<< CHANGED    # stelle fisse, gradient, ecc.
+        self.scene.add_sprite_list("Stars")         # <<< CHANGED         # stelle dinamiche
+        self.scene.add_sprite_list("Clouds")        # <<< CHANGED        # nuvole decorative
+        self.scene.add_sprite_list("Actors")        # <<< CHANGED        # player
+        self.scene.add_sprite_list("Enemies")       # <<< CHANGED
+        self.scene.add_sprite_list("Coins")         # <<< CHANGED
+        self.scene.add_sprite_list("Hearts")        # <<< CHANGED
+        self.scene.add_sprite_list("Projectiles")   # <<< CHANGED
+        self.scene.add_sprite_list("FX")            # <<< CHANGED            # esplosioni
 
-        # --- NEW: imposta il colore in base al tema ---
-        if CURRENT_THEME == "night":
-            arcade.set_background_color(arcade.color.DARK_MIDNIGHT_BLUE)
-        else:
-            arcade.set_background_color(arcade.color.SKY_BLUE)
-
-
-        # Set the music
-        '''try:
-            if self.bgm:
-                self.bgm_player.pause()
-            self.bgm = arcade.Sound(str(MUSIC_DIR/"retro-music_1.ogg"), streaming=True)
-            self.bgm_player = self.bgm.play(volume=self.music_volume, loop=True)
-        except Exception as e:
-            print("Back Ground music file not found or could not be played.", e)'''
-        # --- BGM: prefer WAV streaming on macOS, fall back to OGG, then non-streaming ---
-        # --- BGM: avvia una sola volta ---
-        global BGM_STARTED, BGM_PLAYER
-        if not BGM_STARTED:
-            try:
-                # scegli il formato che sai funzionare su macOS: OGG/Vorbis o WAV
-                music_path = MUSIC_DIR / "retro-music_1.wav"
-                self.bgm = arcade.Sound(str(music_path), streaming=True)
-                BGM_PLAYER = self.bgm.play(loop=True)
-                if BGM_PLAYER:
-                    BGM_PLAYER.volume = self.music_volume
-                BGM_STARTED = True
-                print("[BGM] avviata (prima volta)")
-            except Exception as e:
-                print("[BGM] errore avvio:", e)
-        else:
-            # già attiva → aggiorna solo il volume se vuoi
-            if BGM_PLAYER:
-                BGM_PLAYER.volume = self.music_volume
-            print("[BGM] già attiva: non riavvio")
-
-        # importa: tutte le view puntano allo stesso player
-        self.bgm_player = BGM_PLAYER
-
-        '''try:
-            # stop any previous stream
-            if self.bgm_player:
-                try:
-                    self.bgm_player.pause()
-                    self.bgm_player.delete()
-                except Exception:
-                    pass
-                self.bgm_player = None
-
-            # 1) Try WAV streaming first (works out of the box on macOS)
-            music_path = MUSIC_DIR / "retro-music_1.wav"   # <-- use the WAV you just made
-            self.bgm = arcade.Sound(str(music_path), streaming=True)
-            self.bgm_player = self.bgm.play(loop=True)  # don't pass volume here
-            if self.bgm_player is None:
-                raise RuntimeError("Sound.play() returned None")
-            self.bgm_player.volume = self.music_volume
-            print(f"[BGM] Streaming started: {music_path.name}")
-
-        except Exception as e_wav:
-            print("[BGM] WAV streaming failed:", e_wav)
-            try:
-                # 2) Fall back to OGG streaming (works only if FFmpeg decoders are available)
-                music_path = MUSIC_DIR / "retro-music_1.ogg"
-                self.bgm = arcade.Sound(str(music_path), streaming=True)
-                self.bgm_player = self.bgm.play(loop=True)
-                if self.bgm_player is None:
-                    raise RuntimeError("Sound.play() returned None")
-                self.bgm_player.volume = self.music_volume
-                print(f"[BGM] Streaming started (OGG): {music_path.name}")
-            except Exception as e_ogg:
-                print("[BGM] OGG streaming failed:", e_ogg)
-                try:
-                    # 3) Last resort: non-streaming playback
-                    clip = arcade.load_sound(str(music_path), streaming=False)
-                    arcade.play_sound(clip, volume=self.music_volume)
-                    print("[BGM] Fallback non-streaming started")
-                except Exception as e_ns:
-                    print("[BGM] Fallback non-streaming failed:", e_ns)'''
-
-        # Set up the player
+         # Set up the player
         self.player = arcade.Sprite(scale=SCALING / 1.7) 
         self.player.texture = TEXTURES["fighter.png"]       
         self.player.center_y = SCREEN_HEIGHT / 2
         self.player.left = 10
-        self.all_sprites.append(self.player)
         self.paused = False
+        self.scene["Actors"].append(self.player)
         #set up the hearts
         self.heart = 3
         self.heart_text = arcade.Text(
@@ -234,10 +259,28 @@ class SpaceShooter(arcade.View):
         self.elapsed_time = 0.0
         
 
-        
+       
+        global BGM_STARTED, BGM_PLAYER
+        if not BGM_STARTED:
+            try:
+                # scegli il formato che sai funzionare su macOS: OGG/Vorbis o WAV
+                music_path = MUSIC_DIR / "retro-music_1.wav"
+                self.bgm = arcade.Sound(str(music_path), streaming=True)
+                BGM_PLAYER = self.bgm.play(loop=True)
+                if BGM_PLAYER:
+                    BGM_PLAYER.volume = self.music_volume
+                BGM_STARTED = True
+                print("[BGM] avviata (prima volta)")
+            except Exception as e:
+                print("[BGM] errore avvio:", e)
+        else:
+            # già attiva → aggiorna solo il volume se vuoi
+            if BGM_PLAYER:
+                BGM_PLAYER.volume = self.music_volume
+            print("[BGM] già attiva: non riavvio")
 
-        #set the game over flag
-        self.game_over = False
+        # importa: tutte le view puntano allo stesso player
+        self.bgm_player = BGM_PLAYER
         
         # Spawn a new enemy every 0.5 seconds 
         arcade.schedule(self.add_enemy, 0.5)
@@ -250,6 +293,7 @@ class SpaceShooter(arcade.View):
         if CURRENT_THEME == "night":
             arcade.schedule(self.add_star, 0.35)
             arcade.schedule(self.add_moon, 20.0)
+            self.populate_stars(50)
 
     
     #deallocation
@@ -284,8 +328,8 @@ class SpaceShooter(arcade.View):
             enemy.velocity = (random.randint(-13, -5), 0)
 
             # Add it to the enemies list
-            self.enemies_list.append(enemy)
-            self.all_sprites.append(enemy)
+            self.scene["Enemies"].append(enemy)
+            
 
     
 
@@ -312,8 +356,7 @@ class SpaceShooter(arcade.View):
             cloud.velocity = (random.randint(-5, -2), 0)
 
             # Add it to the enemies list
-            self.clouds_list.append(cloud)
-            self.all_sprites.append(cloud)
+            self.scene["Clouds"].append(cloud)
 
             #spawn more frequently
             spawn = (self.score+self.elapsed_time**0.7)/10
@@ -324,32 +367,47 @@ class SpaceShooter(arcade.View):
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
+    def populate_stars(self, count: int):
+        """Popola subito il cielo con un certo numero di stelle quando parte il tema night."""
+        if STAR_TEXTURE is None:
+            return
+        for _ in range(count):
+            star = StarSprite(scale=SCALING/23)
+            star.texture = STAR_TEXTURE
+            star.left = random.randint(0, SCREEN_WIDTH)
+            star.center_y = random.randint(0, SCREEN_HEIGHT )
+            star.velocity = (-0.5, 0)  # molto lenta
+            star.alpha = random.randint(120, 220)        # luminosità variabile
+            self.scene["Stars"].append(star)
+            
+
     def add_star(self, delta_time: float):
         if self.paused or STAR_TEXTURE is None or CURRENT_THEME != "night":
             return
-        star = StarSprite(scale=SCALING/3)
+        star = StarSprite(scale=SCALING/23)
         star.texture = STAR_TEXTURE
         star.left = random.randint(SCREEN_WIDTH, SCREEN_WIDTH + 80)
-        star.center_y = random.randint(int(SCREEN_HEIGHT*0.55), SCREEN_HEIGHT - 10)
-        star.velocity = (random.randint(-3, -1), 0)  # molto lenta
+        star.center_y = random.randint(0, SCREEN_HEIGHT )
+        star.velocity = (-0.5, 0)  # molto lenta
         star.alpha = random.randint(120, 220)        # luminosità variabile
-        self.bg_sprites.append(star)
+        self.scene["Stars"].append(star)
+        print("added star")
 
     def add_moon(self, delta_time: float):
         if self.paused or "moon.png" not in BG_ELEMENT_TEXTURES or CURRENT_THEME != "night":
             return
         # evita più lune contemporaneamente
-        for s in self.bg_sprites:
+        for s in self.scene["Stars"]:
             if getattr(s, "_is_moon", False):
                 return
-        moon = FlyingSprite(scale=SCALING)
+        moon = FlyingSprite(scale=SCALING/7)
         moon.texture = BG_ELEMENT_TEXTURES["moon.png"]
         moon.left = SCREEN_WIDTH + 100
         moon.center_y = int(SCREEN_HEIGHT * random.uniform(0.65, 0.85))
-        moon.velocity = (-2, 0)
+        moon.velocity = (-0.5, 0)
         moon.alpha = 230
         moon._is_moon = True
-        self.bg_sprites.append(moon)
+        self.scene["Stars"].append(moon)
 
     
     def add_coin(self, delta_time: float):
@@ -374,8 +432,8 @@ class SpaceShooter(arcade.View):
             coin.velocity = (random.randint(-5, -2), 0)
 
             # Add it to the enemies list
-            self.coin_list.append(coin)
-            self.all_sprites.append(coin)
+            self.scene["Coins"].append(coin)
+           
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
@@ -396,8 +454,8 @@ class SpaceShooter(arcade.View):
             shoot.velocity = (7, 0)
 
             # Add it to the enemies list
-            self.shoot_list.append(shoot)
-            self.all_sprites.append(shoot)
+            self.scene["Projectiles"].append(shoot)
+            
 
             #print(f"Cloud added at position {cloud.left}, {cloud.top}")  # Debug statement
 
@@ -418,8 +476,8 @@ class SpaceShooter(arcade.View):
                 heart.velocity = (random.randint(-5, -2), 0)
 
                 # Add it to the heart list
-                self.heart_list.append(heart)
-                self.all_sprites.append(heart)
+                self.scene["Hearts"].append(heart)
+                
 
                 #print(f"Heart added at position {cloud.left}, {cloud.top}")  # Debug statement
     
@@ -429,34 +487,11 @@ class SpaceShooter(arcade.View):
         """
         self.clear()
         # --- NEW ---
-        self.bg_sprites.draw()
-        self.all_sprites.draw()
+        self.scene.draw()
         self.score_text.text = f"{self.score}"
         self.heart_text.text=f"{self.heart}"  #update the score text 
         self.heart_text.draw()      #draw the score
         self.score_text.draw()      #draw the score
-    #    arcade.draw_text(
-    #        f"{self.score}",
-    #        SCREEN_WIDTH / 2,           # centro orizzontale
-    #        SCREEN_HEIGHT - 60,         # poco sotto il bordo superiore
-    #        arcade.color.WHITE,
-    #        50,                       # grandezza carattere
-    #        anchor_x="center",  
-    #        font_name="retro"  # deve essere il nome del font, non per forza il file
-    #    )
-    #    self.score_text.draw()
-        #descrive lo stato di sconfitta
-        #if self.game_over:
-            #arcade.draw_text(
-            #    "GAME OVER",
-             #   SCREEN_WIDTH / 2,
-              #  SCREEN_HEIGHT / 2,
-               # arcade.color.RED,
-                #font_size=60,
-                #anchor_x="center",
-                #font_name="retro"
-            #)
-
 
     def on_key_press(self, symbol, modifiers):
         
@@ -523,7 +558,52 @@ class SpaceShooter(arcade.View):
             self.player.change_x = 0
 
 
-    def on_update(self, delta_time: float):
+    def on_button_press(self, controller, button_name: str):
+        # Spara
+        if button_name in ("a", "south", "x"):   # metti quelli che hai
+            self.add_shoot()
+
+        # Pausa (menu/start)
+        if button_name in ("start", "menu"):
+            pauseview = PauseMenuView(self)
+            self.window.show_view(pauseview)
+            return
+
+        # Quit (opzionale)
+        if button_name in ("back", "select"):
+            _stop_bgm()
+            arcade.close_window()
+
+    def on_button_release(self, controller, button_name: str):
+        # Di solito niente qui per un runner 2D
+        pass
+
+
+    def on_stick_motion(self, controller, stick: str, value: float):
+        """
+        Stick analogici: valori in [-1.0, 1.0]
+        Convenzione: 'leftstick' per movimento. (Puoi usare anche 'rightstick' per altro.)
+        """
+        if self.paused:
+            return
+        try:
+            x, y = float(value.x), float(value.y)
+        except AttributeError:
+            # value potrebbe essere (x, y)
+            try:
+                x, y = float(value[0]), float(value[1])
+            except Exception:
+                x, y = 0.0, 0.0
+
+        if stick == "leftstick":
+            # Applica deadzone
+            dx = 0.0 if abs(x) < self.STICK_DEADZONE else x
+            dy = 0.0 if abs(y) < self.STICK_DEADZONE else y
+            self.player.change_x = self.PAD_SPEED * dx
+            self.player.change_y = self.PAD_SPEED * dy
+
+
+    def on_update(self, delta_time: float=1/60):
         """ Update the positions and statuses of all game objects
         If paused, do nothing
 
@@ -536,72 +616,67 @@ class SpaceShooter(arcade.View):
             return
         self.elapsed_time += delta_time
 
+        self.scene["Stars"].update()        # <<< CHANGED
+        self.scene["Clouds"].update()       # <<< CHANGED
+        self.scene["Enemies"].update()      # <<< CHANGED
+        self.scene["Coins"].update()        # <<< CHANGED
+        self.scene["Hearts"].update()       # <<< CHANGED
+        self.scene["Projectiles"].update()  # <<< CHANGED
+        self.scene["FX"].update_animation(delta_time)  # <<< CHANGED
+        self.scene["Actors"].update()       # <<< CHANGED  # player bounds dopo
+
         # Did you hit enemies? If so, end the game
-        if self.player.collides_with_list(self.enemies_list):
-             #explosion sound
+        hit_enemies=arcade.check_for_collision_with_list(self.player, self.scene["Enemies"])
+        if hit_enemies:
             self.sfx_exp_1.play(volume=self.sfx_exp_vol_2)
             if self.heart != 0:
                 self.heart -= 1
-                for enemy in self.player.collides_with_list(self.enemies_list):
-                    explosion = Explosion(
-                        textures=self.explosion_textures,
-                        frame_time=0.04,               # regola la velocità (più basso = più veloce)
-                        scale=SCALING * 1.6            # regola la dimensione
-                    )
-                    explosion.center_x = enemy.center_x
-                    explosion.center_y = enemy.center_y
-                    self.explosion_list.append(explosion)
-                    self.all_sprites.append(explosion)
+                for enemy in hit_enemies:
+                    self._spawn_explosion(enemy.center_x, enemy.center_y)
                     enemy.remove_from_sprite_lists()
             else:
                 game_over_view = GameOverView(self.score)
                 self.window.show_view(game_over_view)
+                return
             # self.game_over = True
             #arcade.close_window()
             # Bullets vs enemies
-        for bullet in list(self.shoot_list):
-            hit_list = arcade.check_for_collision_with_list(bullet, self.enemies_list)
+        for bullet in list(self.scene["Projectiles"]):
+            hit_list = arcade.check_for_collision_with_list(bullet, self.scene["Enemies"])
             if hit_list:
                 bullet.remove_from_sprite_lists()
                 self.killcounter +=1
                 if self.killcounter % 10 == 0 and self.killcounter != 0:
-                    self.add_heart()
+                    #more complicated
+                    if self.heart < 4:
+                        self.add_heart()
+                    else:
+                        if self.score % 2 == 0:
+                            self.add_heart()
+                        
+
                 for enemy in hit_list:
-                    explosion = Explosion(
-                        textures=self.explosion_textures,
-                        frame_time=0.04,               # regola la velocità (più basso = più veloce)
-                        scale=SCALING * 1.6            # regola la dimensione
-                    )
-                    explosion.center_x = enemy.center_x
-                    explosion.center_y = enemy.center_y
-                    #explosion sound
+                    self._spawn_explosion(enemy.center_x, enemy.center_y)
                     self.sfx_exp_2.play(volume=self.sfx_exp_vol)
-
-                    self.explosion_list.append(explosion)
-                    self.all_sprites.append(explosion)
-
-
                     enemy.remove_from_sprite_lists()
-            
-        if self.player.collides_with_list(self.coin_list):
+
+
+        coins_hit=arcade.check_for_collision_with_list(self.player, self.scene["Coins"])
+        if coins_hit: 
             if not self.game_over:
                 self.sfx_coin.play(volume=self.sfx_exp_vol)
                 self.score+=1
-            for coin in self.player.collides_with_list(self.coin_list):
+            for coin in coins_hit:
                 coin.remove_from_sprite_lists()
             
-        
-        if self.player.collides_with_list(self.heart_list):
+        hearts_hit=arcade.check_for_collision_with_list(self.player, self.scene["Hearts"])
+        if hearts_hit:
             if not self.game_over:
                 self.sfx_heart.play(volume=self.sfx_exp_vol)
                 self.heart+=1
-            for heart in self.player.collides_with_list(self.heart_list):
+            for heart in hearts_hit:
                 heart.remove_from_sprite_lists()
-
-        # Update everything
-        self.all_sprites.update()
-
-        self.all_sprites.update_animation(delta_time)
+                
 
         # Keep the player on screen
         if self.player.top > SCREEN_HEIGHT: 
@@ -613,7 +688,15 @@ class SpaceShooter(arcade.View):
         if self.player.left < 0:
             self.player.left = 0
 
-
+    def _spawn_explosion(self, x: float, y: float):
+        explosion = Explosion(
+            textures=self.explosion_textures,
+            frame_time=0.04,
+            scale=SCALING * 1.6
+        )
+        explosion.center_x = x
+        explosion.center_y = y
+        self.scene["FX"].append(explosion)
 
 
 class FlyingSprite(arcade.Sprite):
@@ -639,6 +722,9 @@ class GameOverView(arcade.View):
     def __init__(self, score):
         super().__init__()
         self.score = score
+        result=submit_score(score)
+        self.is_record = result["is_record"]
+        self.high_score = result["high_score"]
         self.game_over = None
         self.finalscore = None
         self.resume = None
@@ -661,6 +747,14 @@ class GameOverView(arcade.View):
                          30,
                          anchor_x="center",
                          font_name="retro")
+        
+        self.record_text=arcade.Text(f"New Record: {self.score}",
+                         w / 2,
+                         h / 2,
+                         arcade.color.WHITE,
+                         30,
+                         anchor_x="center",
+                         font_name="retro")
 
         self.resume= arcade.Text("Premi R per ricominciare",
                          w / 2,
@@ -673,8 +767,14 @@ class GameOverView(arcade.View):
     def on_draw(self):
         self.clear()
         self.game_over.draw()
-        self.finalscore.text = f"Score: {self.score}"
-        self.finalscore.draw()
+        print(self.is_record)
+        if self.is_record:
+            self.record_text.text= f"New Record: {self.score}"
+            self.record_text.draw()
+        else:
+            self.finalscore.text = f"Score: {self.score}"
+            self.finalscore.draw()
+        
         self.resume.draw()
 
     def on_key_press(self, symbol, modifiers):
@@ -738,16 +838,26 @@ class PauseMenuView(arcade.View):
         self.game_view = game_view
         self.game_view.paused = True
 
+        
+
         w, h = self.window.width, self.window.height
         self.title = arcade.Text("PAUSA", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
         self.msg1  = arcade.Text("R or P - Resume", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg2  = arcade.Text("M - Menu", w/2, h/2 - 25, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg3  = arcade.Text("Q - Quit", w/2, h/2 - 60, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
 
+    def draw_rect_lrtb(left, right, top, bottom, color):
+        
+        if hasattr(arcade, "draw_lrtb_rectangle_filled"):
+            arcade.draw_lrtb_rectangle_filled(left, right, top, bottom, color)
+        else:
+            arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, color)
+
+    
     def on_draw(self):
         # Disegna il gioco “congelato” sotto 
         self.game_view.on_draw()
-        arcade.draw_lrtb_rectangle_filled(0, self.window.width, self.window.height, 0, (0, 0, 0, 180))
+        PauseMenuView.draw_rect_lrtb(0, self.window.width, self.window.height, 0, (0, 0, 0, 180))
         self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw()
 
     def on_key_press(self, symbol, modifiers):
@@ -772,7 +882,7 @@ class InstructionView(arcade.View):
         
     def on_show_view(self):
         w, h = self.window.width, self.window.height
-        arcade.set_background_color(arcade.color.SKY_BLUE)
+        apply_theme_background()
         self.title = arcade.Text("INSTRUCTIONS", w/2, h/2 + 60, arcade.color.WHITE, 48, anchor_x="center", font_name="retro")
         self.msg1  = arcade.Text("I/J/K/L or Arrows - Move", w/2, h/2 + 10, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg2  = arcade.Text("SPACE or S - Shoot", w/2, h/2 - 20, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
@@ -780,11 +890,18 @@ class InstructionView(arcade.View):
         self.msg4  = arcade.Text("M - back to menu", w/2, h/2 - 80, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
         self.msg5 = arcade.Text("P - Pause", w/2, h/2 - 115, arcade.color.YELLOW, 24, anchor_x="center", font_name="retro")
 
+    def draw_rect_lrtb(left, right, top, bottom, color):
+        if hasattr(arcade, "draw_lrtb_rectangle_filled"):
+            arcade.draw_lrtb_rectangle_filled(left, right, top, bottom, color)
+        else:
+            arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, color)
+
+
     def on_draw(self):
         
         if self.game_view is not None:
             self.game_view.on_draw()
-            arcade.draw_lrbt_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
+            InstructionView.draw_rect_lrtb(0, self.window.width, self.window.height, 0, (0, 0, 0, 140))
         else:
             self.clear()
         self.title.draw(); self.msg1.draw(); self.msg2.draw(); self.msg3.draw(); self.msg4.draw(); self.msg5.draw()
@@ -805,12 +922,17 @@ class MainMenuView(arcade.View):
         self.game_view = game_view
         self.title = self.msg1 = self.msg2 = self.msg3 = None
         
+    def draw_rect_lrtb(left, right, top, bottom, color):
     
+        if hasattr(arcade, "draw_lrtb_rectangle_filled"):
+            arcade.draw_lrtb_rectangle_filled(left, right, top, bottom, color)
+        else:
+            arcade.draw_lrbt_rectangle_filled(left, right, bottom, top, color)
+
 
     def on_show_view(self):
         w, h = self.window.width, self.window.height
-        arcade.set_background_color(arcade.color.SKY_BLUE)
-
+        apply_theme_background()
         # Titolo (volendo mostra anche il tema corrente)
         self.title = arcade.Text(
             f"MENU  ({CURRENT_THEME.upper()})",
@@ -852,7 +974,7 @@ class MainMenuView(arcade.View):
         # Se vuoi mantenere l’effetto “sfondo scurito” quando arrivi dal gioco:
         if self.game_view is not None:
             self.game_view.on_draw()
-            arcade.draw_lrtb_rectangle_filled(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
+            MainMenuView.draw_rect_lrtb(0, self.window.width, 0, self.window.height, (0, 0, 0, 140))
         else:
             self.clear()
 
@@ -883,11 +1005,13 @@ class MainMenuView(arcade.View):
             # Tema Giorno
             CURRENT_THEME = "day"
             print("[Theme] DAY")
+            apply_theme_background()
 
         elif symbol == arcade.key.N:
             # Tema Notte
             CURRENT_THEME = "night"
             print("[Theme] NIGHT")
+            apply_theme_background()
 
         elif symbol == arcade.key.I:
             # Schermata impostazioni/istruzioni
